@@ -1,0 +1,41 @@
+name: Odyssey Aug 20 seat watch
+
+# Backstop for the Aug 20 cancellation lottery. The local Mac watcher checks
+# every 20s and will beat this every time - but only while the laptop is awake.
+# This runs regardless, and catches any returned pair that sits for >15 min.
+#
+# WHY IT NEEDS A BROWSER: Harkins renders every seat as an identical <button>,
+# so the DOM says nothing about availability. The real state lives in React,
+# where each seat has a numeric `status` and 0 means AVAILABLE. Verified against
+# the rendered seat map on 2026-07-28.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'      # every 15 minutes
+  workflow_dispatch:
+
+concurrency:
+  group: seats
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright Chromium
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm i playwright --silent
+          npx playwright install --with-deps chromium
+
+      - name: Look for centre pairs in rows G-M
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: node seatcheck.js
