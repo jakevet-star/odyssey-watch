@@ -1,0 +1,106 @@
+name: Watcher health check
+
+# WHY THIS EXISTS
+# On 2026-07-30 the local watcher spent hours logging "swept 3 showtimes,
+# nothing" while it was actually reading nothing at all - Harkins had stopped
+# rendering the anchors it scraped, and separately Jake's IP had been throttled.
+# Silence looked identical to "no seats available". Nobody noticed until he
+# happened to try the site by hand.
+#
+# So: an independent job that tries to do the work and SHOUTS if it can't.
+# It is quiet when healthy. Every alert here means the watching is broken, not
+# that seats are available.
+
+on:
+  schedule:
+    - cron: '17 * * * *'          # hourly, off the hour to dodge cron congestion
+  workflow_dispatch:
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright Chromium
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm i playwright --silent
+          npx playwright install --with-deps chromium
+
+      - name: Verify the whole chain still works
+        shell: bash
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          set +e
+          UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
+          PROBLEMS=$(mktemp)
+
+          # --- 1. can we reach the movie page and see the embedded JSON? ---
+          code=$(curl -sL -o /tmp/h.html -w '%{http_code}' --max-time 25 -A "$UA" \
+                 "https://www.harkins.com/movies/the-odyssey/2026-08-20")
+          n=$(grep -o 'session/[0-9]*/date/2026-08-20' /tmp/h.html | sort -u | wc -l | tr -d ' ')
+          echo "movie page: HTTP $code, $n Odyssey sessions found"
+          if [ "$code" != "200" ]; then
+            echo "movie page returned HTTP $code" >> "$PROBLEMS"
+          elif [ "${n:-0}" -lt 1 ]; then
+            # Aug 20 is a known-good control. Zero sessions means our parser
+            # broke or Harkins changed their payload shape.
+            echo "movie page OK but ZERO sessions parsed for Aug 20 - parser may be broken" >> "$PROBLEMS"
+          fi
+
+          # --- 2. can we actually read a seat map? ---
+          HEALTH_FILE=/tmp/health.json DATE=2026-08-20 node seatcheck.js > /tmp/sc.log 2>&1
+          cat /tmp/sc.log
+          if [ -f /tmp/health.json ]; then
+            blind=$(grep -o '"blind": *[a-z]*' /tmp/health.json | awk '{print $2}')
+            read_ok=$(grep -o '"read": *[0-9]*' /tmp/health.json | awk '{print $2}')
+            disc=$(grep -o '"discovered": *[0-9]*' /tmp/health.json | awk '{print $2}')
+            echo "health: discovered=$disc read=$read_ok blind=$blind"
+            if [ "$blind" = "true" ]; then
+              echo "seat reads ALL FAILED (discovered $disc showtimes, read 0)" >> "$PROBLEMS"
+            fi
+            if [ "${disc:-0}" -lt 1 ]; then
+              echo "discovery returned 0 showtimes for Aug 20" >> "$PROBLEMS"
+            fi
+          else
+            echo "seatcheck.js produced no health file - it crashed" >> "$PROBLEMS"
+          fi
+
+          # --- 3. is the Aug 21 detector still able to answer the question? ---
+          code21=$(curl -sL -o /tmp/h21.html -w '%{http_code}' --max-time 25 -A "$UA" \
+                   "https://www.harkins.com/movies/the-odyssey/2026-08-21")
+          if [ "$code21" != "200" ]; then
+            echo "Aug 21 probe returned HTTP $code21 - detector may be blind" >> "$PROBLEMS"
+          else
+            echo "Aug 21 probe: HTTP 200 (detector can see)"
+          fi
+
+          # --- report ONLY if something is wrong ---
+          if [ -s "$PROBLEMS" ]; then
+            echo "=== PROBLEMS ==="; cat "$PROBLEMS"
+            BODY=$(mktemp)
+            {
+              echo "The Odyssey watcher is not working properly:"
+              echo
+              cat "$PROBLEMS"
+              echo
+              echo "This is NOT a seat alert. It means the watching is broken,"
+              echo "so silence can no longer be trusted."
+              echo
+              echo "Check: https://github.com/jakevet-star/odyssey-watch/actions"
+            } > "$BODY"
+            curl -s -X POST "https://ntfy.sh/$NTFY_TOPIC" \
+              -H 'Title: WATCHER BROKEN - not a seat alert' \
+              -H 'Priority: high' -H 'Tags: warning' \
+              -H 'Click: https://github.com/jakevet-star/odyssey-watch/actions' \
+              --data-binary "@$BODY" >/dev/null
+            exit 1
+          fi
+
+          echo "=== all healthy, staying quiet ==="
