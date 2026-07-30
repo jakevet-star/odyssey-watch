@@ -25,8 +25,12 @@ jobs:
       - name: Check Harkins Arizona Mills for Odyssey dates past Aug 20
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        shell: bash
         run: |
-          set -uo pipefail
+          # GitHub defaults to `bash -eo pipefail`; -e aborts on any non-zero
+          # command, which kills `[ test ] && action` lines when the test is
+          # false. Turn it off and check things explicitly instead.
+          set +e
           UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
           MOVIE=HO00014201
           FOUND_FILE=$(mktemp)
@@ -53,7 +57,7 @@ jobs:
             n=$(grep -o "session/[0-9]*/date/$d" /tmp/page.html | sort -u | wc -l | tr -d ' ')
             if grep -q "movie/$MOVIE" /tmp/page.html && [ "${n:-0}" -gt 0 ]; then
               printf '%s: %s showtimes\n' "$d" "$n" >> "$FOUND_FILE"
-              [ -z "$FIRST" ] && FIRST="$d"
+              if [ -z "$FIRST" ]; then FIRST="$d"; fi
               echo "$d -> LIVE, $n showtimes"
             else
               echo "$d -> not on sale"
@@ -91,7 +95,7 @@ jobs:
               -H 'Tags: rotating_light' \
               -H "Click: https://harkins.com/movies/the-odyssey/$FIRST" \
               --data-binary "@$BODY_FILE" >/dev/null || true
-            [ "$i" -lt 5 ] && sleep 20
+            if [ "$i" -lt 5 ]; then sleep 20; fi
           done
 
           echo "alerts sent"
