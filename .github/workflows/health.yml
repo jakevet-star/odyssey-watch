@@ -15,6 +15,11 @@ on:
   schedule:
     - cron: '17 * * * *'          # hourly, off the hour to dodge cron congestion
   workflow_dispatch:
+    inputs:
+      test_alert:
+        description: 'Fire a TEST push to prove GitHub -> ntfy -> phone works'
+        type: boolean
+        default: false
 
 jobs:
   health:
@@ -31,6 +36,35 @@ jobs:
           npm init -y >/dev/null 2>&1
           npm i playwright --silent
           npx playwright install --with-deps chromium
+
+      # The alert path from a GitHub runner had never actually been exercised -
+      # the workflows have only ever found nothing. This proves it end to end.
+      - name: Test alert (manual only)
+        if: inputs.test_alert
+        shell: bash
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          BODY=$(mktemp)
+          {
+            echo "This is a TEST from GitHub Actions."
+            echo
+            echo "It proves the cloud watchers can reach your phone even with"
+            echo "your laptop closed. No seats have opened."
+            echo
+            echo "A real alert looks like:"
+            echo "  Fri, Aug 21 7:15 PM"
+            echo "  Row J, seats 17 + 18"
+          } > "$BODY"
+          for i in 1 2 3; do
+            curl -s -X POST "https://ntfy.sh/$NTFY_TOPIC" \
+              -H "Title: [TEST] GitHub -> phone works ($i/3)" \
+              -H 'Priority: urgent' -H 'Tags: white_check_mark' \
+              -H 'Click: https://www.harkins.com/movies/the-odyssey/2026-08-21' \
+              --data-binary "@$BODY" >/dev/null
+            if [ "$i" -lt 3 ]; then sleep 15; fi
+          done
+          echo "3 test pushes sent from runner $(curl -s https://api.ipify.org)"
 
       - name: Verify the whole chain still works
         shell: bash
