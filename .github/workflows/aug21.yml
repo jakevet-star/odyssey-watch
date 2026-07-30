@@ -36,10 +36,18 @@ jobs:
                    2026-08-26 2026-08-27 2026-08-28 2026-08-29; do
             # Harkins server-renders showtime links into the raw HTML, so a plain
             # curl sees them. No browser needed for this check.
-            code=$(curl -s -o /tmp/page.html -w '%{http_code}' --max-time 20 -A "$UA" \
-                   "https://harkins.com/movies/the-odyssey/$d" || echo 000)
+            # -L matters: GitHub runner IPs get a 307 redirect that a home IP does
+            # not. Follow it rather than treating it as a failure.
+            code=$(curl -sL -o /tmp/page.html -w '%{http_code}' --max-time 25 -A "$UA" \
+                   -H 'Accept-Language: en-US,en;q=0.9' \
+                   "https://www.harkins.com/movies/the-odyssey/$d" || echo 000)
             if [ "$code" != "200" ]; then
-              echo "$d -> HTTP $code (blocked or unreachable from this runner?)"
+              echo "$d -> HTTP $code, size $(wc -c < /tmp/page.html) - retrying without www"
+              code=$(curl -sL -o /tmp/page.html -w '%{http_code}' --max-time 25 -A "$UA" \
+                     "https://harkins.com/movies/the-odyssey/$d" || echo 000)
+            fi
+            if [ "$code" != "200" ]; then
+              echo "$d -> HTTP $code (still failing from this runner)"
               continue
             fi
             n=$(grep -o "session/[0-9]*/date/$d" /tmp/page.html | sort -u | wc -l | tr -d ' ')
