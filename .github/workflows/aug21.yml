@@ -1,1 +1,110 @@
-Will you have time and tokens to go ahead and figure out how we can make this build proof, please? 
+name: Odyssey Aug 21 watch
+
+# BEATING GITHUB'S 5-MINUTE CRON FLOOR
+# GitHub cron cannot fire more often than every 5 minutes, and scheduled runs get
+# delayed 5-15 min under load. So instead of one short job every 5 minutes, this
+# starts ONE job that loops internally every 30 seconds for nearly 6 hours (the
+# max job duration). Scheduled every 3 hours, so consecutive runs overlap by
+# roughly 3 hours and a delayed start can never leave a gap.
+#
+# Cost: a lot of runner minutes. Irrelevant here - public repos get unlimited
+# Actions minutes, which is exactly why this repo is public.
+
+on:
+  schedule:
+    - cron: '0 */3 * * *'        # 00:00, 03:00, 06:00 ... UTC
+  workflow_dispatch:
+
+# Deliberately NO concurrency group. Overlapping runs are the point.
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350          # 5h50m, just under GitHub's 6h ceiling
+    steps:
+      - name: Poll Harkins every 30s for Odyssey dates past Aug 20
+        shell: bash
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          # GitHub defaults to `bash -eo pipefail`; -e aborts on any non-zero
+          # command, which kills `[ test ] && action` lines. Turn it off.
+          set +e
+
+          UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
+          MOVIE=HO00014201
+          # Two tiers. If the run gets extended it arrives as a whole multi-week
+          # block, so Aug 21 appearing IS the signal - checking all nine dates at
+          # the same rate multiplies load for no extra information. Movie pages
+          # are CDN-cached (s-maxage=60) so they are cheap, but there is no
+          # reason to be wasteful with a runner IP either.
+          FAST="2026-08-21"
+          ALL="2026-08-21 2026-08-22 2026-08-23 2026-08-24 2026-08-25 2026-08-26 2026-08-27 2026-08-28 2026-08-29"
+          INTERVAL=30
+          DEADLINE=$(( $(date +%s) + 340*60 ))   # stop before the job timeout
+          LOOPS=0
+
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            LOOPS=$(( LOOPS + 1 ))
+            FOUND_FILE=$(mktemp)
+            FIRST=""
+            # every 10th loop (~5 min) sweep the full window
+            if [ $(( LOOPS % 10 )) -eq 1 ]; then DATES="$ALL"; else DATES="$FAST"; fi
+
+            # All dates in parallel - the whole sweep is well under a second.
+            # -L matters: GitHub runner IPs get a 307 that a home IP does not.
+            for d in $DATES; do
+              curl -sL --max-time 20 -A "$UA" -H 'Accept-Language: en-US,en;q=0.9' \
+                   "https://www.harkins.com/movies/the-odyssey/$d" -o "/tmp/p_$d.html" &
+            done
+            wait
+
+            for d in $DATES; do
+              f="/tmp/p_$d.html"
+              if [ ! -s "$f" ]; then continue; fi
+              n=$(grep -o "session/[0-9]*/date/$d" "$f" | sort -u | wc -l | tr -d ' ')
+              if grep -q "movie/$MOVIE" "$f" && [ "${n:-0}" -gt 0 ]; then
+                printf '%s: %s showtimes\n' "$d" "$n" >> "$FOUND_FILE"
+                if [ -z "$FIRST" ]; then FIRST="$d"; fi
+              fi
+            done
+
+            if [ -s "$FOUND_FILE" ]; then
+              echo "=== LIVE on loop $LOOPS ==="
+              cat "$FOUND_FILE"
+
+              BODY_FILE=$(mktemp)
+              {
+                echo "Harkins Arizona Mills just posted:"
+                echo
+                cat "$FOUND_FILE"
+                echo
+                echo "TAP to open $FIRST showtimes."
+                echo "Take Row J, seats 17 + 18. Prefer an evening show."
+                echo "Whole auditorium is unsold, so no rush."
+                echo
+                echo "(GitHub Actions - works with your laptop closed)"
+              } > "$BODY_FILE"
+
+              for i in 1 2 3 4 5; do
+                curl -s -X POST "https://ntfy.sh/$NTFY_TOPIC" \
+                  -H "Title: AUG 21 LIVE - tap to book ($i/5)" \
+                  -H 'Priority: urgent' \
+                  -H 'Tags: rotating_light' \
+                  -H "Click: https://www.harkins.com/movies/the-odyssey/$FIRST" \
+                  --data-binary "@$BODY_FILE" >/dev/null
+                if [ "$i" -lt 5 ]; then sleep 20; fi
+              done
+
+              echo "alerts sent - exiting so the next scheduled run takes over"
+              exit 0
+            fi
+
+            # Keep the log readable: one line a minute, not one every 30s.
+            if [ $(( LOOPS % 2 )) -eq 1 ]; then
+              echo "loop $LOOPS ($(date -u '+%H:%M:%SZ')): Aug 21+ not on sale"
+            fi
+            sleep "$INTERVAL"
+          done
+
+          echo "hit time limit after $LOOPS checks; next scheduled run continues"
