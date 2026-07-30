@@ -9,9 +9,13 @@ name: Odyssey Aug 20 seat watch
 # where each seat has a numeric `status` and 0 means AVAILABLE. Verified against
 # the rendered seat map on 2026-07-28.
 
+# Jake's home IP got silently throttled by Harkins on 2026-07-30 after ~14k
+# seat-map loads: full 200s, complete bundle, but the ticketing SPA hangs on an
+# infinite spinner. GitHub runners are unaffected, so seat watching lives here
+# now. Long-running loop rather than cron, to beat the 5-minute floor.
 on:
   schedule:
-    - cron: '*/15 * * * *'      # every 15 minutes
+    - cron: '0 */3 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -21,7 +25,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
 
@@ -35,7 +39,20 @@ jobs:
           npm i playwright --silent
           npx playwright install --with-deps chromium
 
-      - name: Look for centre pairs in rows G-M
+      - name: Look for centre pairs in rows G-M (loop ~5h50m)
+        shell: bash
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: node seatcheck.js
+        run: |
+          set +e
+          DEADLINE=$(( $(date +%s) + 335*60 ))
+          N=0
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            N=$(( N + 1 ))
+            echo "--- pass $N ($(date -u '+%H:%M:%SZ')) ---"
+            node seatcheck.js
+            # 45s between passes: fast enough to catch a returned pair, gentle
+            # enough that we do not get this IP throttled too.
+            sleep 45
+          done
+          echo "time limit reached after $N passes
