@@ -1,24 +1,3 @@
-name: iPhone Duo pickup watch
-
-# Same pattern as the Odyssey watcher: GitHub cron can't fire more often than every 5 min and is
-# often late, so each run loops internally every ~30 s for ~5h45m, and a new run starts every
-# 3 hours. Runs overlap, so a late start never leaves a gap, and each run gets a fresh IP.
-# Remove the schedule once Jake has the phone.
-on:
-  push:
-    paths: ['duo/**', '.github/workflows/duo-watch.yml']
-  schedule:
-    - cron: '7 */3 * * *'
-  workflow_dispatch:
-
-jobs:
-  watch:
-    runs-on: ubuntu-latest
-    timeout-minutes: 355
-    steps:
-      - uses: actions/checkout@v4
-      - name: Watch Apple pickup stock and push Jake's phone
-        env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-          DIAG_TOPIC: duo-diag-cd440587
-        run: python3 duo/duo_watch.py
+permissions:
+  actions: write
+  contents: read
