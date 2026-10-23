@@ -1,0 +1,21 @@
+name: Duo probe (can Apple be reached from GitHub?)
+on:
+  push:
+    paths: ['.github/workflows/duo-probe.yml']
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ask Apple's pickup check once and report the HTTP code
+        shell: bash
+        run: |
+          set +e
+          UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
+          for loc in 77002 78701; do
+            CODE=$(curl -sL --max-time 20 -A "$UA" -H 'Accept: application/json' -o /tmp/r.json -w '%{http_code}' "https://www.apple.com/shop/retail/pickup-message?pl=true&parts.0=MK1E4LL/A&location=$loc")
+            STORES=$(python3 -c "import json;d=json.load(open('/tmp/r.json'))['body'];print(len(d.get('stores',[])))" 2>/dev/null)
+            IP=$(curl -s --max-time 10 https://api.ipify.org)
+            curl -s -d "loc=$loc http=$CODE stores=$STORES ip=$IP" https://ntfy.sh/duo-diag-cd440587 > /dev/null
+          done
