@@ -41,6 +41,19 @@ def push(title, msg, priority="urgent", tags="iphone,rotating_light", click=BAG_
                    capture_output=True)
 
 
+def hand_off():
+    """Apple is refusing this runner's IP: start a fresh GitHub run (new machine, new IP) and exit.
+    workflow_dispatch is the one event GITHUB_TOKEN is allowed to trigger."""
+    repo, token = os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("GH_TOKEN", "")
+    if not (repo and token):
+        return False
+    r = subprocess.run(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "-X", "POST",
+                        "-H", f"Authorization: Bearer {token}", "-H", "Accept: application/vnd.github+json",
+                        f"https://api.github.com/repos/{repo}/actions/workflows/duo-watch.yml/dispatches",
+                        "-d", '{"ref":"main"}'], capture_output=True, text=True)
+    return r.stdout.strip() == "204"
+
+
 def is_available(v):
     if v.get("pickupDisplay") == "available":
         return True
@@ -99,11 +112,23 @@ def main():
         if DIAG and (loops == 1 or loops % 20 == 0 or fresh or fails in (3, 10)):
             push("diag", f"topic_set={bool(TOPIC)} loop={loops} ok={ok} codes={codes} stores_seen={len(seen)} hits={len(hits)} fails={fails}",
                  priority="min", tags="gear", topic=DIAG)
-        if fails == 8:    # ~1 hour of Apple refusing this runner
+        if fails == 8:    # hand-off failing and Apple still refusing
             push("Cloud watcher blocked", "Apple is refusing this GitHub machine. The next scheduled run starts on a fresh one within 3 hours.",
                  priority="high", tags="warning")
-        # 10/23 launch morning: 30 s drew repeated HTTP 541 blocks. 60 s, and a 10-minute quiet spell once Apple refuses.
-        wait = 60 if fails < 3 else 600
+        # 10/23 Jake: "Don't slow them, just switch the GitHub." Full speed; when Apple blocks this runner's IP,
+        # hand off to a brand-new runner (new IP) and exit instead of waiting it out.
+        if fails >= 2:
+            young = time.time() - start < 120          # blocked straight away: pause so a bad streak can't loop fast
+            if young:
+                time.sleep(60)
+            ok_dispatch = hand_off()
+            if DIAG:
+                push("diag", f"blocked after loop={loops}; handed off to a new runner: {ok_dispatch}", priority="min", tags="gear", topic=DIAG)
+            if ok_dispatch:
+                return
+            time.sleep(120)                            # couldn't hand off: keep going here
+            continue
+        wait = 30
         time.sleep(wait + random.uniform(-4, 4))
 
 
