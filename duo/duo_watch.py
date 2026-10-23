@@ -99,10 +99,11 @@ def main():
         if DIAG and (loops == 1 or loops % 20 == 0 or fresh or fails in (3, 10)):
             push("diag", f"topic_set={bool(TOPIC)} loop={loops} ok={ok} codes={codes} stores_seen={len(seen)} hits={len(hits)} fails={fails}",
                  priority="min", tags="gear", topic=DIAG)
-        if fails == 20:   # ~10+ minutes of Apple refusing this runner
+        if fails == 8:    # ~1 hour of Apple refusing this runner
             push("Cloud watcher blocked", "Apple is refusing this GitHub machine. The next scheduled run starts on a fresh one within 3 hours.",
                  priority="high", tags="warning")
-        wait = 30 if fails < 3 else 120
+        # 10/23 launch morning: 30 s drew repeated HTTP 541 blocks. 60 s, and a 10-minute quiet spell once Apple refuses.
+        wait = 60 if fails < 3 else 600
         time.sleep(wait + random.uniform(-4, 4))
 
 
