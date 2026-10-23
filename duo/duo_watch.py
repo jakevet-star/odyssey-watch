@@ -54,6 +54,22 @@ def hand_off():
     return r.stdout.strip() == "204"
 
 
+OPEN_MARKER = "PICKUP_OPEN_SENT"
+
+
+def announce_open_once():
+    """Jake 10/23: tell him once when Apple opens pickup reservations (quotes stop saying 'Check back')."""
+    if not DIAG:
+        return
+    r = subprocess.run(["curl", "-s", "--max-time", "10", f"https://ntfy.sh/{DIAG}/json?poll=1&since=48h"],
+                       capture_output=True, text=True)
+    if OPEN_MARKER in r.stdout:
+        return
+    push("Apple pickup is LIVE", "Apple just opened iPhone Duo pickup reservations. Nothing in stock at your stores yet; you'll get the next ping the second one is.",
+         priority="high", tags="iphone")
+    push("diag", OPEN_MARKER, priority="min", tags="gear", topic=DIAG)
+
+
 def is_available(v):
     if v.get("pickupDisplay") == "available":
         return True
@@ -63,7 +79,7 @@ def is_available(v):
 
 def check():
     q = "&".join(f"parts.{i}={p}" for i, p in enumerate(PARTS))
-    seen, hits, codes = set(), [], []
+    seen, hits, codes, opened = set(), [], [], False
     for loc in LOCATIONS:
         code, body = curl(f"https://www.apple.com/shop/retail/pickup-message?pl=true&{q}&location={loc}")
         codes.append(code)
@@ -75,22 +91,29 @@ def check():
                 continue
             seen.add(num)
             for part, v in (s.get("partsAvailability") or {}).items():
+                q = ((v.get("messageTypes") or {}).get("regular") or {}).get("storePickupQuote") or ""
+                if part in PARTS and q and not q.lower().startswith("check back"):
+                    opened = True
                 if part in PARTS and is_available(v):
                     hits.append((STORES[num], round(float(s.get("storedistance") or 0)), part, num))
-    return seen, hits, codes
+    return seen, hits, codes, opened
 
 
 def main():
     start = time.time()
     alerted, fails, loops, found_total = {}, 0, 0, 0
-    push("Cloud watcher on (GitHub)", f"Checking {len(STORES)} stores x {len(PARTS)} models about every 30 s for the next ~6 h.",
-         priority="min", tags="eyes")
+    # 10/23 Jake: start-up pings were noise (35 in a day, one per machine switch). Status goes to the diag topic only;
+    # his phone hears from this script ONLY when a phone is in stock (or when switching machines keeps failing).
+    if DIAG:
+        push("diag", f"run started: {len(STORES)} stores x {len(PARTS)} models", priority="min", tags="eyes", topic=DIAG)
     while time.time() - start < RUN_SECONDS:
         loops += 1
         try:
-            seen, hits, codes = check()
+            seen, hits, codes, opened = check()
         except Exception as e:  # never die mid-run
-            seen, hits, codes = set(), [], [f"err:{e.__class__.__name__}"]
+            seen, hits, codes, opened = set(), [], [f"err:{e.__class__.__name__}"], False
+        if opened and not hits:
+            announce_open_once()
         ok = len(seen) >= len(STORES) - 1 and all(c == "200" for c in codes)
         fails = 0 if ok else fails + 1
         now = time.time()
@@ -113,8 +136,8 @@ def main():
             push("diag", f"topic_set={bool(TOPIC)} loop={loops} ok={ok} codes={codes} stores_seen={len(seen)} hits={len(hits)} fails={fails}",
                  priority="min", tags="gear", topic=DIAG)
         if fails == 8:    # hand-off failing and Apple still refusing
-            push("Cloud watcher blocked", "Apple is refusing this GitHub machine. The next scheduled run starts on a fresh one within 3 hours.",
-                 priority="high", tags="warning")
+            if DIAG:   # 10/23 Jake: phone gets only "pickup is live" and "in stock"
+                push("diag", "blocked 8 checks in a row and hand-off failing", priority="min", tags="warning", topic=DIAG)
         # 10/23 Jake: "Don't slow them, just switch the GitHub." Full speed; when Apple blocks this runner's IP,
         # hand off to a brand-new runner (new IP) and exit instead of waiting it out.
         if fails >= 2:
