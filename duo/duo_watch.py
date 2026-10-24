@@ -17,8 +17,14 @@ PARTS = {
 PREFERRED = "MK1E4LL/A"
 STORES = {"R205": "First Colony", "R058": "Houston Galleria", "R164": "Memorial City",
           "R437": "Highland Village", "R216": "Domain Northside (Austin)", "R085": "Barton Creek (Austin)"}
-LOCATIONS = ["77002", "78701"]          # downtown Houston + downtown Austin; together they cover all six stores
+LOCATIONS = ["77002"]   # 10/24: the Houston query alone returns all six stores; the Austin one timed out every time, which made every run hand off (the run storm)
 BAG_URL = "https://www.apple.com/shop/bag"
+
+
+def model_link(part):
+    """The exact in-stock model's buy page (10/24 Jake lost a 512GB reconfiguring the 256GB in his bag)."""
+    gb, color = PARTS[part].lower().split(" ", 1)
+    return f"https://www.apple.com/shop/buy-iphone/iphone-duo/7.6-inch-display-{gb}-{color.replace(' ', '-')}-unlocked"
 TOPIC = os.environ.get("NTFY_TOPIC", "")
 DIAG = os.environ.get("DIAG_TOPIC", "")
 RUN_SECONDS = int(os.environ.get("RUN_SECONDS", str(345 * 60)))
@@ -120,16 +126,14 @@ def main():
         fresh = [h for h in hits if now - alerted.get(h[3] + h[2], 0) > REALERT_S]
         if fresh:
             found_total += 1
-            pref = [h for h in fresh if h[2] == PREFERRED]
-            t = sorted(pref or fresh, key=lambda h: (h[0] != "First Colony", h[1]))[0]
+            # 10/24 Jake: "Any close store any phone idc." Nearest store with any phone wins.
+            t = sorted(fresh, key=lambda h: (h[0] != "First Colony", h[1]))[0]
             others = "; ".join(sorted({f"{h[0]}: {PARTS[h[2]]}" for h in fresh}))
-            if t[2] == PREFERRED:
-                title = f"iPhone Duo 256GB STAR WHITE IN STOCK: {t[0]}"
-                msg = f"It's the one in your bag. Tap, choose Pickup at {t[0]}, then Apple Pay. All stock: {others}"
-            else:
-                title = f"iPhone Duo {PARTS[t[2]]} IN STOCK: {t[0]}"
-                msg = f"Tap to open your bag. Keep only the {PARTS[t[2]]}, choose Pickup at {t[0]}, then Apple Pay. All stock: {others}"
-            push(title, msg)
+            # 10/24: every alert opens the exact in-stock model; his Safari ADD bookmark puts it in the bag.
+            title = f"iPhone Duo {'256GB STAR WHITE' if t[2] == PREFERRED else PARTS[t[2]]} IN STOCK: {t[0]}"
+            msg = (f"Tap -> opens the {PARTS[t[2]]}. Tap your ADD bookmark (or No AppleCare + Add to Bag), "
+                   f"Pickup at {t[0]}, Apple Pay. All stock: {others}")
+            push(title, msg, click=model_link(t[2]))
             for h in fresh:
                 alerted[h[3] + h[2]] = now
         if DIAG and (loops == 1 or loops % 20 == 0 or fresh or fails in (3, 10)):
