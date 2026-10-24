@@ -28,6 +28,7 @@ def model_link(part):
 TOPIC = os.environ.get("NTFY_TOPIC", "")
 DIAG = os.environ.get("DIAG_TOPIC", "")
 RUN_SECONDS = int(os.environ.get("RUN_SECONDS", str(345 * 60)))
+LANE = int(os.environ.get("LANE", "0"))   # 10/24 Jake "we need to be faster": 3 lanes on 3 machines, 10 s apart = a check every ~10 s
 REALERT_S = 60
 
 
@@ -105,7 +106,18 @@ def check():
     return seen, hits, codes, opened
 
 
+def already_sent(title, secs=60):
+    """Another lane sent this exact alert in the last minute: skip it so Jake gets one ping per drop, not three."""
+    try:
+        r = subprocess.run(["curl", "-s", "--max-time", "3", f"https://ntfy.sh/{TOPIC}/json?poll=1&since={secs}s"],
+                           capture_output=True, text=True)
+        return any(json.loads(l).get("title") == title for l in r.stdout.splitlines() if l.strip())
+    except Exception:
+        return False
+
+
 def main():
+    time.sleep(LANE * 10)    # stagger the lanes so together they check every ~10 s
     start = time.time()
     alerted, fails, loops, found_total = {}, 0, 0, 0
     # 10/23 Jake: start-up pings were noise (35 in a day, one per machine switch). Status goes to the diag topic only;
@@ -133,7 +145,8 @@ def main():
             title = f"iPhone Duo {'256GB STAR WHITE' if t[2] == PREFERRED else PARTS[t[2]]} IN STOCK: {t[0]}"
             msg = (f"Tap -> opens the {PARTS[t[2]]}. Tap your ADD bookmark (or No AppleCare + Add to Bag), "
                    f"Pickup at {t[0]}, Apple Pay. All stock: {others}")
-            push(title, msg, click=model_link(t[2]))
+            if not already_sent(title):
+                push(title, msg, click=model_link(t[2]))
             for h in fresh:
                 alerted[h[3] + h[2]] = now
         if DIAG and (loops == 1 or loops % 20 == 0 or fresh or fails in (3, 10)):
