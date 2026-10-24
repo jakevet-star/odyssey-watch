@@ -15,8 +15,7 @@ PARTS = {
     "MK1Q4LL/A": "2TB Star White", "MK1R4LL/A": "2TB Night Sky",
 }
 PREFERRED = "MK1E4LL/A"
-STORES = {"R205": "First Colony", "R058": "Houston Galleria", "R164": "Memorial City",
-          "R437": "Highland Village", "R216": "Domain Northside (Austin)", "R085": "Barton Creek (Austin)"}
+STORES = {"R205": "First Colony", "R058": "Houston Galleria", "R164": "Memorial City", "R437": "Highland Village", "R321": "Willowbrook", "R204": "Baybrook", "R126": "The Woodlands"}
 LOCATIONS = ["77002"]   # 10/24: the Houston query alone returns all six stores; the Austin one timed out every time, which made every run hand off (the run storm)
 BAG_URL = "https://www.apple.com/shop/bag"
 
