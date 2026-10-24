@@ -28,7 +28,6 @@ def model_link(part):
 TOPIC = os.environ.get("NTFY_TOPIC", "")
 DIAG = os.environ.get("DIAG_TOPIC", "")
 RUN_SECONDS = int(os.environ.get("RUN_SECONDS", str(345 * 60)))
-LANE = int(os.environ.get("LANE", "0"))   # 10/24 Jake "we need to be faster": 3 lanes on 3 machines, 10 s apart = a check every ~10 s
 REALERT_S = 60
 
 
@@ -117,7 +116,6 @@ def already_sent(title, secs=60):
 
 
 def main():
-    time.sleep(LANE * 10)    # stagger the lanes so together they check every ~10 s
     start = time.time()
     alerted, fails, loops, found_total = {}, 0, 0, 0
     # 10/23 Jake: start-up pings were noise (35 in a day, one per machine switch). Status goes to the diag topic only;
@@ -155,18 +153,12 @@ def main():
         if fails == 8:    # hand-off failing and Apple still refusing
             if DIAG:   # 10/23 Jake: phone gets only "pickup is live" and "in stock"
                 push("diag", "blocked 8 checks in a row and hand-off failing", priority="min", tags="warning", topic=DIAG)
-        # 10/23 Jake: "Don't slow them, just switch the GitHub." Full speed; when Apple blocks this runner's IP,
-        # hand off to a brand-new runner (new IP) and exit instead of waiting it out.
+        # 10/24: when Apple blocks this machine, back off 15 minutes like the home Mac does. No switching to a new
+        # machine to get around the block (that is dodging Apple's bot check, which we don't do).
         if fails >= 2:
-            young = time.time() - start < 120          # blocked straight away: pause so a bad streak can't loop fast
-            if young:
-                time.sleep(60)
-            ok_dispatch = hand_off()
             if DIAG:
-                push("diag", f"blocked after loop={loops}; handed off to a new runner: {ok_dispatch}", priority="min", tags="gear", topic=DIAG)
-            if ok_dispatch:
-                return
-            time.sleep(120)                            # couldn't hand off: keep going here
+                push("diag", f"blocked after loop={loops}; backing off 15 min", priority="min", tags="gear", topic=DIAG)
+            time.sleep(15 * 60)
             continue
         wait = 30
         time.sleep(wait + random.uniform(-4, 4))
