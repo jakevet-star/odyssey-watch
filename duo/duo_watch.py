@@ -79,7 +79,7 @@ def is_available(v):
     if v.get("pickupDisplay") == "available":
         return True
     q = ((v.get("messageTypes") or {}).get("regular") or {}).get("storePickupQuote") or v.get("pickupSearchQuote") or ""
-    return q.lower().startswith(("available", "today at", "pick up today", "pickup today"))
+    return False   # 10/24: only Apple's real "available" flag counts; "Available" text alone was a false alarm
 
 
 def check():
@@ -117,7 +117,7 @@ def main():
             seen, hits, codes, opened = check()
         except Exception as e:  # never die mid-run
             seen, hits, codes, opened = set(), [], [f"err:{e.__class__.__name__}"], False
-        if opened and not hits:
+        if False:   # 10/24: pickup opened 7:08 AM; this repeat check spammed "pickup is LIVE" every 30 s
             announce_open_once()
         ok = len(seen) >= len(STORES) - 1 and all(c == "200" for c in codes)
         fails = 0 if ok else fails + 1
