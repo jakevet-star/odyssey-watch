@@ -2,7 +2,7 @@ name: iPhone Duo pickup watch
 
 # Same pattern as the Odyssey watcher: GitHub cron can't fire more often than every 5 min and is
 # often late, so each run loops internally every ~30 s for ~5h45m, and a new run starts every
-# 3 hours. Runs overlap, so a late start never leaves a gap, and each run gets a fresh IP.
+# 3 hours and takes over from the one going (see concurrency below); each run gets a fresh IP.
 # Remove the schedule once Jake has the phone.
 on:
   push:
@@ -14,6 +14,13 @@ on:
 permissions:
   actions: write      # lets a blocked run start a fresh run on a new machine (new IP)
   contents: read
+
+# 10/25: one run at a time. A blocked run hands off to a fresh run instead of ending, so every scheduled
+# run and every push used to start another chain that never stopped (6 at once, 3-4 copies of each alert).
+# Now the newest run (a hand-off, the schedule or a push) replaces the one going.
+concurrency:
+  group: duo-watch
+  cancel-in-progress: true
 
 jobs:
   watch:
