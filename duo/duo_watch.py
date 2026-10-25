@@ -16,7 +16,7 @@ PARTS = {
 }
 RANK = {p: i for i, p in enumerate(PARTS)}   # PARTS runs cheapest first, so a lower rank is the cheaper model
 PREFERRED = "MK1E4LL/A"
-ALERT_PARTS = {"MK1E4LL/A", "MK1F4LL/A"}   # 10/25 Jake swaps his 1TB for a 256GB before the return window: only the 256GB models alert
+ALERT_PARTS = {"MK1E4LL/A", "MK1F4LL/A"}   # 10/25 Jake swaps the 1TB for a 256GB before the return window: only the 256GB models alert
 STORES = {"R205": "First Colony", "R058": "Houston Galleria", "R164": "Memorial City", "R437": "Highland Village", "R321": "Willowbrook", "R204": "Baybrook", "R126": "The Woodlands"}
 LOCATIONS = ["77002"]   # 10/24: the Houston query alone returns all six stores; the Austin one timed out every time, which made every run hand off (the run storm)
 BAG_URL = "https://www.apple.com/shop/bag"
