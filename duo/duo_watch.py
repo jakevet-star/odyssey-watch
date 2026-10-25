@@ -5,7 +5,7 @@ lookup every ~30 s from the runner's IP (not Jake's home Wi-Fi, which Apple thro
 Alerts go straight to Jake's phone through ntfy (topic in the NTFY_TOPIC secret).
 It never buys anything: the alert opens his pre-loaded Apple bag and he pays with Apple Pay.
 """
-import json, os, random, subprocess, time
+import json, os, random, re, subprocess, time
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 PARTS = {
@@ -29,6 +29,7 @@ TOPIC = os.environ.get("NTFY_TOPIC", "")
 DIAG = os.environ.get("DIAG_TOPIC", "")
 RUN_SECONDS = int(os.environ.get("RUN_SECONDS", str(345 * 60)))
 REALERT_S = 60
+MAC_QUIET_MIN = 30   # minutes without a hold report from a Mac on LIVE before his phone hears about it
 
 
 def curl(url):
@@ -110,6 +111,42 @@ def check():
     return seen, hits, codes, opened
 
 
+def mac_check():
+    """Jake 10/24: tell his phone if a Mac's Chrome hold goes silent (Chrome closed, Mac asleep, Wi-Fi down).
+    Each hold reports on the diag topic every 10 minutes ("hold ok device=main mode=LIVE"); this runs on GitHub,
+    so it still works when the Mac itself can't. Markers on the diag topic keep overlapping runs from repeating it."""
+    r = subprocess.run(["curl", "-s", "--max-time", "10", f"https://ntfy.sh/{DIAG}/json?poll=1&since=6h"],
+                       capture_output=True, text=True)
+    last, quiet, back = {}, {}, {}
+    for line in r.stdout.splitlines():
+        try:
+            m = json.loads(line)
+        except ValueError:
+            continue
+        msg, t = m.get("message") or "", m.get("time", 0)
+        dev = re.search(r"device=(\w+)", msg)
+        if not dev:
+            continue
+        if msg.startswith("hold "):
+            mode = re.search(r"mode=(\w+)", msg)
+            last[dev.group(1)] = (t, mode.group(1) if mode else "?")
+        elif msg.startswith("MAC_QUIET "):
+            quiet[dev.group(1)] = t
+        elif msg.startswith("MAC_BACK "):
+            back[dev.group(1)] = t
+    now = time.time()
+    for d, (t, mode) in last.items():
+        name = "the Mac" if d == "main" else "the M1"
+        if now - t > MAC_QUIET_MIN * 60:
+            if mode == "LIVE" and quiet.get(d, 0) < t:   # not told about this silence yet
+                push(f"Duo: {name} has gone quiet", f"No report from Chrome on {name} for {round((now - t) / 60)} minutes. "
+                     "Check it: Chrome open, hold tab in checkout, charger in, Wi-Fi on.", priority="high", tags="warning")
+                push("diag", f"MAC_QUIET device={d}", priority="min", tags="gear", topic=DIAG)
+        elif quiet.get(d, 0) > back.get(d, 0) and quiet.get(d, 0) < t:   # it went quiet, and has reported since
+            push(f"Duo: {name} is back", "Chrome on it is reporting in again.", priority="default", tags="white_check_mark")
+            push("diag", f"MAC_BACK device={d}", priority="min", tags="gear", topic=DIAG)
+
+
 def main():
     start = time.time()
     alerted, fails, loops, found_total = {}, 0, 0, 0
@@ -144,6 +181,11 @@ def main():
             push(title, msg, click=model_link(t[2]))
             for h in fresh:
                 alerted[h[3] + h[2]] = now
+        if DIAG and loops % 10 == 0:   # about every 5 minutes
+            try:
+                mac_check()
+            except Exception:
+                pass
         if DIAG and (loops == 1 or loops % 20 == 0 or fresh or fails in (3, 10)):
             push("diag", f"topic_set={bool(TOPIC)} loop={loops} ok={ok} codes={codes} stores_seen={len(seen)} hits={len(hits)} fails={fails}",
                  priority="min", tags="gear", topic=DIAG)
