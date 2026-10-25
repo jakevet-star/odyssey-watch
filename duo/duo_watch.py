@@ -14,6 +14,7 @@ PARTS = {
     "MK1J4LL/A": "1TB Star White", "MK1L4LL/A": "1TB Night Sky",
     "MK1Q4LL/A": "2TB Star White", "MK1R4LL/A": "2TB Night Sky",
 }
+RANK = {p: i for i, p in enumerate(PARTS)}   # PARTS runs cheapest first, so a lower rank is the cheaper model
 PREFERRED = "MK1E4LL/A"
 STORES = {"R205": "First Colony", "R058": "Houston Galleria", "R164": "Memorial City", "R437": "Highland Village", "R321": "Willowbrook", "R204": "Baybrook", "R126": "The Woodlands"}
 LOCATIONS = ["77002"]   # 10/24: the Houston query alone returns all six stores; the Austin one timed out every time, which made every run hand off (the run storm)
@@ -130,9 +131,12 @@ def main():
         fresh = [h for h in hits if now - alerted.get(h[3] + h[2], 0) > REALERT_S]
         if fresh:
             found_total += 1
-            # 10/24 Jake: "Any close store any phone idc." Nearest store with any phone wins.
-            t = sorted(fresh, key=lambda h: (h[0] != "First Colony", h[1]))[0]
-            others = "; ".join(sorted({f"{h[0]}: {PARTS[h[2]]}" for h in fresh}))
+            # 10/24 Jake: "lowest gb variant preferred". The cheapest model in stock wins; among its stores, First Colony, then nearest.
+            t = sorted(fresh, key=lambda h: (RANK[h[2]], h[0] != "First Colony", h[1]))[0]
+            by_model = {}
+            for h in sorted(fresh, key=lambda h: (RANK[h[2]], h[1])):
+                by_model.setdefault(PARTS[h[2]], []).append(h[0])
+            others = "; ".join(f"{m} at {', '.join(dict.fromkeys(s))}" for m, s in by_model.items())
             # 10/24: every alert opens the exact in-stock model; his Safari ADD bookmark puts it in the bag.
             title = f"iPhone Duo {'256GB STAR WHITE' if t[2] == PREFERRED else PARTS[t[2]]} IN STOCK: {t[0]}"
             msg = (f"Tap -> opens the {PARTS[t[2]]}. Tap your ADD bookmark (or No AppleCare + Add to Bag), "
