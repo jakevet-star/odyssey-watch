@@ -41,9 +41,14 @@ def push(title, msg, priority="urgent", tags="iphone,rotating_light", click=BAG_
     topic = topic or TOPIC
     if not topic:
         return
-    subprocess.run(["curl", "-s", "--max-time", "15", "-H", f"Title: {title}", "-H", f"Priority: {priority}",
-                    "-H", f"Tags: {tags}", "-H", f"Click: {click}", "-d", msg, f"https://ntfy.sh/{topic}"],
-                   capture_output=True)
+    for attempt in range(3):   # a send that fails quietly is a missed alert: check ntfy's answer and retry
+        r = subprocess.run(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "15",
+                            "-H", f"Title: {title}", "-H", f"Priority: {priority}",
+                            "-H", f"Tags: {tags}", "-H", f"Click: {click}", "-d", msg, f"https://ntfy.sh/{topic}"],
+                           capture_output=True, text=True)
+        if r.stdout.strip() == "200":
+            return
+        time.sleep(2)
 
 
 def hand_off():
