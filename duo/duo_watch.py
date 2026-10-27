@@ -17,6 +17,7 @@ PARTS = {
 RANK = {p: i for i, p in enumerate(PARTS)}   # PARTS runs cheapest first, so a lower rank is the cheaper model
 PREFERRED = "MK1E4LL/A"
 ALERT_PARTS = {"MK1E4LL/A", "MK1F4LL/A"}   # 10/25 Jake swaps the 1TB for a 256GB before the return window: only the 256GB models alert
+ALERT_STORES = {"R205"}   # 10/27 Jake: alerts for First Colony only (the other stores are still checked, for the health numbers)
 STORES = {"R205": "First Colony", "R058": "Houston Galleria", "R164": "Memorial City", "R437": "Highland Village", "R321": "Willowbrook", "R204": "Baybrook", "R126": "The Woodlands"}
 LOCATIONS = ["77002"]   # 10/24: the Houston query alone returns all six stores; the Austin one timed out every time, which made every run hand off (the run storm)
 BAG_URL = "https://www.apple.com/shop/bag"
@@ -107,7 +108,7 @@ def check():
                 q = ((v.get("messageTypes") or {}).get("regular") or {}).get("storePickupQuote") or ""
                 if part in PARTS and q and not q.lower().startswith("check back"):
                     opened = True
-                if part in ALERT_PARTS and is_available(v):
+                if part in ALERT_PARTS and num in ALERT_STORES and is_available(v):
                     hits.append((STORES[num], round(float(s.get("storedistance") or 0)), part, num))
     return seen, hits, codes, opened
 
