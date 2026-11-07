@@ -1,0 +1,29 @@
+name: Zelda Switch 2 restock alerts
+
+# Jake 11/06: alerts only, never buys. Reads restock trackers' public Bluesky posts (never the stores' own sites,
+# whose terms forbid scripts) and pushes each console drop to Jake's phone through ntfy with a tap-to-open link.
+# Each run loops ~5h45m; the schedule starts a fresh run every 3 hours, which takes over from the one going.
+on:
+  push:
+    paths: ['zelda/**', '.github/workflows/zelda-watch.yml']
+  schedule:
+    - cron: '17 */3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zelda-watch
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - name: Watch the trackers and push Jake's phone
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python3 zelda/zelda_watch.py
