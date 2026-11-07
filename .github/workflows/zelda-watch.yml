@@ -2,7 +2,9 @@ name: Zelda Switch 2 restock alerts
 
 # Jake 11/06: alerts only, never buys. Reads restock trackers' public Bluesky posts (never the stores' own sites,
 # whose terms forbid scripts) and pushes each console drop to Jake's phone through ntfy with a tap-to-open link.
-# Each run loops ~5h45m; the schedule starts a fresh run every 3 hours, which takes over from the one going.
+# Jake 11/07: no gaps, like the iPhone tracker. GitHub's schedule skipped 4 of 7 restarts on 11/07 and left the
+# watch off for hours, so each run now starts the next one itself after ~5h45m and the new run takes over.
+# A push run hands off after 2 minutes, so every change proves the chain works. The schedule is only a backup.
 on:
   push:
     paths: ['zelda/**', '.github/workflows/zelda-watch.yml']
@@ -11,6 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write      # lets a run start the next one (workflow_dispatch is the one event GITHUB_TOKEN may trigger)
   contents: read
 
 concurrency:
@@ -26,4 +29,6 @@ jobs:
       - name: Watch the trackers and push Jake's phone
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          GH_TOKEN: ${{ github.token }}
+          RUN_SECONDS: ${{ github.event_name == 'push' && '120' || '' }}
         run: python3 zelda/zelda_watch.py
