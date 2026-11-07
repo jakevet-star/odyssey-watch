@@ -1,15 +1,19 @@
 """Zelda Switch 2 restock alerts (Jake 2026-11-06).
 
-Runs inside a GitHub Actions job for ~5h45m. Nintendo, Target, Walmart, Amazon and GameStop forbid scripts on
-their sites, so this never touches them. It reads the public Bluesky posts of restock trackers that post every
-drop with a link (Wario64 posted the Nov 5 Nintendo Store drop at 11:07 AM), through Bluesky's open public API,
-and pushes each console drop to Jake's phone through ntfy with a tap-to-open link. It never buys anything.
+Runs inside a GitHub Actions job for ~5h45m, then starts the next run itself, so the watch never stops (Jake 11/07:
+no gaps, like the iPhone tracker; on 11/07 GitHub's schedule skipped 4 of 7 restarts and left it off for hours).
+Nintendo, Target, Walmart, Amazon and GameStop forbid scripts on their sites, so this never touches them. It reads
+the public Bluesky posts of restock trackers that post every drop with a link (Wario64 posted the Nov 5 Nintendo
+Store drop at 11:07 AM), through Bluesky's open public API, and pushes each console drop to Jake's phone through ntfy
+with a tap-to-open link. It never buys anything.
 """
 import datetime as dt, hashlib, json, os, re, subprocess, time, urllib.parse
 
 TOPIC = os.environ.get("NTFY_TOPIC", "")
 DIAG = "zdiag-" + hashlib.sha256(TOPIC.encode()).hexdigest()[:16] if TOPIC else ""   # private health/dedupe channel
-RUN_SECONDS = int(os.environ.get("RUN_SECONDS", str(345 * 60)))
+RUN_SECONDS = int(os.environ.get("RUN_SECONDS") or 345 * 60)   # then start the next run (a push run: after 2 min)
+LIMIT_S = 353 * 60   # GitHub kills the job at 355 min: never run past this
+RETRY_S, RECHECK_S = 60, 5 * 60   # hand-off failed: try again in a minute; worked but not replaced yet: try again
 POLL_S = 20
 FRESH_S = 15 * 60   # a drop lasts minutes: a post older than this is history, never an alert
 REPEAT_S = 10 * 60   # both trackers post the same drop minutes apart: one ping per store per drop
@@ -79,12 +83,26 @@ def diag(msg):
 
 
 def already_sent():
-    """Posts alerted by earlier runs (a new run takes over every 3 hours), so a drop never pings twice."""
+    """Posts alerted by earlier runs (a new run takes over every few hours), so a drop never pings twice."""
     if not DIAG:
         return set()
     r = subprocess.run(["curl", "-s", "--max-time", "10", f"https://ntfy.sh/{DIAG}/json?poll=1&since=12h"],
                        capture_output=True, text=True)
     return set(re.findall(r'ZELDA_SENT (\S+?)"', r.stdout))
+
+
+def hand_off():
+    """Start the next run before this one ends. Its arrival cancels this run (one run at a time), and a post made
+    in the few seconds between is still under 15 minutes old when the next run reads it, so no drop is missed.
+    workflow_dispatch is the one event a run's own GITHUB_TOKEN may trigger; the schedule stays as a backup."""
+    repo, token = os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("GH_TOKEN", "")
+    if not (repo and token):
+        return False
+    r = subprocess.run(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "15", "-X", "POST",
+                        "-H", f"Authorization: Bearer {token}", "-H", "Accept: application/vnd.github+json",
+                        f"https://api.github.com/repos/{repo}/actions/workflows/zelda-watch.yml/dispatches",
+                        "-d", '{"ref":"main"}'], capture_output=True, text=True)
+    return r.stdout.strip() == "204"
 
 
 def feed(actor):
@@ -126,10 +144,20 @@ def check(sent, now, recent):
 
 def main():
     start, loops, fails, recent = time.time(), 0, 0, {}
+    next_hand_off, tries = start + RUN_SECONDS, 0
     sent = already_sent()
-    diag(f"zelda run started: trackers={','.join(TRACKERS)} remembered={len(sent)}")
-    while time.time() - start < RUN_SECONDS:
+    diag(f"zelda run started ({os.environ.get('GITHUB_EVENT_NAME', 'local')}): trackers={','.join(TRACKERS)} "
+         f"remembered={len(sent)} hand-off in {RUN_SECONDS // 60} min")
+    while time.time() - start < LIMIT_S:
         loops += 1
+        if time.time() >= next_hand_off:   # keep watching until the next run takes over
+            tries += 1
+            if tries in (1, 10, 100):
+                diag(f"zelda hand-off try {tries} after loop={loops}")
+            ok = hand_off()
+            if not ok and tries in (1, 10, 100):
+                diag(f"zelda hand-off try {tries} failed; retrying every minute, the schedule is the backup")
+            next_hand_off = time.time() + (RECHECK_S if ok else RETRY_S)
         try:
             check(sent, time.time(), recent)
             fails = 0
